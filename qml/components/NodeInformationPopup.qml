@@ -60,7 +60,10 @@ Popup {
             contentWidth: availableWidth
             clip: true
 
-            ColumnLayout {
+            // A Column positioner, never a Quick Layout: a Repeater inside one
+            // hits a Qt 6.4 use-after-free. See AlertPopup.qml.
+            Column {
+                id: informationColumn
                 width: informationScroll.availableWidth
                 spacing: 0
 
@@ -71,7 +74,7 @@ Popup {
                         readonly property int valueLineCount: informationValue.lineCount
                         readonly property int valueWrapMode: informationValue.wrapMode
 
-                        width: parent.width
+                        width: informationColumn.width
                         spacing: 0
 
                         KeyValueRow {

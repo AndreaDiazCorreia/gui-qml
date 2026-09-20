@@ -57,7 +57,10 @@ Popup {
             contentWidth: availableWidth
             clip: true
 
-            ColumnLayout {
+            // A Column positioner, never a Quick Layout: a Repeater inside one
+            // hits a Qt 6.4 use-after-free. See AlertPopup.qml.
+            Column {
+                id: warningsColumn
                 width: warningsScroll.availableWidth
                 spacing: 12
 
@@ -73,7 +76,7 @@ Popup {
                         readonly property int warningLineCount: warningText.lineCount
                         readonly property int warningWrapMode: warningText.wrapMode
 
-                        Layout.fillWidth: true
+                        width: warningsColumn.width
                         spacing: 10
 
                         Icon {
@@ -100,7 +103,7 @@ Popup {
 
                 CoreText {
                     objectName: "nodeNoWarningsText"
-                    Layout.fillWidth: true
+                    width: warningsColumn.width
                     visible: nodeModel.warningList.length === 0
                     text: qsTr("No current warnings.")
                     color: Theme.color.neutral7
