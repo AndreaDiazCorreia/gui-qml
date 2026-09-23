@@ -23,6 +23,25 @@ WALLET_NAME = "testwallet"
 MAINNET_ADDRESS = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"
 
 
+REVIEW_POPUP = "sendPaymentRequestReviewPopup"
+
+
+def wait_for_review(gui, timeout_ms=20000):
+    gui.wait_for_property(REVIEW_POPUP, "opened", True, timeout_ms=timeout_ms)
+
+
+def apply_review(gui):
+    """Accept the review. The popup can reopen at once for the next request,
+    so callers assert the effect rather than the popup closing."""
+    wait_for_review(gui)
+    gui.click("paymentRequestReviewApplyButton")
+
+
+def discard_review(gui):
+    wait_for_review(gui)
+    gui.click("paymentRequestReviewDiscardButton")
+
+
 def open_send_options(gui):
     """Open the Send options (ellipsis) popup."""
     gui.click("sendOptionsButton")
@@ -74,6 +93,13 @@ def run_tests():
         gui = harness.driver
         wait_for_wallet(gui)
         gui.wait_for_page("sendPage", timeout_ms=20000)
+        wait_for_review(gui)
+        assert first_address in str(gui.get_property("paymentRequestReviewAddress", "text"))
+        assert "0.01234567" in str(gui.get_property("paymentRequestReviewAmount", "text"))
+        assert "startup-label" in str(gui.get_property("paymentRequestReviewLabel", "text"))
+        assert "startup-note" in str(gui.get_property("paymentRequestReviewMessage", "text"))
+        assert gui.get_property(REVIEW_POPUP, "replacesValues") is False
+        apply_review(gui)
         gui.wait_for_property(
             "sendPaymentRequestStatusText", "text",
             lambda v: "command line" in str(v), timeout_ms=20000,
@@ -86,7 +112,7 @@ def run_tests():
             "sendPaymentRequestMessageText", "text",
             lambda v: "startup-note" in str(v), timeout_ms=10000,
         )
-        print("Test 1 PASSED: command line URI applied to the Send form.")
+        print("Test 1 PASSED: request reviewed, then applied to the Send form.")
 
         # ----------------------------------------------------------------
         # Test 2: a URI with an uppercase scheme is accepted. Desktop
@@ -97,6 +123,7 @@ def run_tests():
         gui = harness.driver
         wait_for_wallet(gui)
         gui.wait_for_page("sendPage", timeout_ms=20000)
+        apply_review(gui)
         gui.wait_for_property(
             "sendNoteInput", "text",
             lambda v: "upper-label" in str(v), timeout_ms=20000,
@@ -133,21 +160,20 @@ def run_tests():
         gui = harness.driver
         wait_for_wallet(gui)
         gui.wait_for_page("sendPage", timeout_ms=20000)
+        apply_review(gui)
         gui.wait_for_property(
             "sendNoteInput", "text",
             lambda v: "first-label" in str(v), timeout_ms=20000,
         )
         gui.wait_for_property(
-            "sendPaymentUriOverwritePopup", "opened", True, timeout_ms=20000,
+            REVIEW_POPUP, "replacesValues", True, timeout_ms=20000,
         )
-        gui.click("sendPaymentUriOverwriteCancelButton")
-        gui.wait_for_property(
-            "sendPaymentUriOverwritePopup", "opened", False, timeout_ms=10000,
-        )
+        discard_review(gui)
+        gui.wait_for_property(REVIEW_POPUP, "opened", False, timeout_ms=10000)
         assert "first-label" in str(gui.get_property("sendNoteInput", "text")), (
-            "Cancelling the overwrite must leave the first request in the form"
+            "Discarding the review must leave the first request in the form"
         )
-        print("Test 4 PASSED: second request delivered, gated by confirmation.")
+        print("Test 4 PASSED: second request reviewed, discarding keeps the first.")
 
         # ----------------------------------------------------------------
         # Test 5: with no wallet loaded the request is kept, not consumed,
@@ -171,6 +197,7 @@ def run_tests():
         )
         wait_for_wallet(gui)
         gui.wait_for_page("sendPage", timeout_ms=20000)
+        apply_review(gui)
         gui.wait_for_property(
             "sendNoteInput", "text",
             lambda v: "late-label" in str(v), timeout_ms=30000,
@@ -197,6 +224,7 @@ def run_tests():
             "The next request was applied over the rejection"
         )
         gui.click("sendPaymentRequestErrorCloseButton")
+        apply_review(gui)
         gui.wait_for_property(
             "sendNoteInput", "text",
             lambda v: "after-error-label" in str(v), timeout_ms=20000,
@@ -215,21 +243,21 @@ def run_tests():
         gui = harness.driver
         wait_for_wallet(gui)
         gui.wait_for_page("sendPage", timeout_ms=20000)
+        apply_review(gui)
         gui.wait_for_property(
-            "sendPaymentUriOverwritePopup", "opened", True, timeout_ms=20000,
+            REVIEW_POPUP, "replacesValues", True, timeout_ms=20000,
         )
         rpc_call(
             harness.gui_rpc_port, "unloadwallet",
             {"wallet_name": WALLET_NAME, "load_on_startup": True},
         )
-        gui.wait_for_property(
-            "sendPaymentUriOverwritePopup", "opened", False, timeout_ms=20000,
-        )
+        gui.wait_for_property(REVIEW_POPUP, "opened", False, timeout_ms=20000)
         rpc_call(
             harness.gui_rpc_port, "loadwallet",
             {"filename": WALLET_NAME, "load_on_startup": True},
         )
         wait_for_wallet(gui)
+        apply_review(gui)
         gui.wait_for_property(
             "sendNoteInput", "text",
             lambda v: "after-switch-label" in str(v), timeout_ms=30000,
@@ -263,10 +291,8 @@ def run_tests():
             "sendNoteInput", "text",
             lambda v: "manual-label" in str(v), timeout_ms=10000,
         )
-        gui.wait_for_property(
-            "sendPaymentUriOverwritePopup", "opened", True, timeout_ms=20000,
-        )
-        gui.click("sendPaymentUriOverwriteCancelButton")
+        discard_review(gui)
+        gui.wait_for_property(REVIEW_POPUP, "opened", False, timeout_ms=10000)
         print("Test 8 PASSED: queue released when the error was replaced.")
 
         # ----------------------------------------------------------------
