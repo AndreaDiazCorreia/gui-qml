@@ -35,6 +35,7 @@ PageStack {
 
     signal transactionPrepared(bool multipleRecipientsEnabled)
     signal viewTransactionInActivity(string txid)
+    signal paymentRequestOutcome(string outcome)
 
     function returnToSendForm() {
         if (root.depth > 1) {
@@ -50,6 +51,11 @@ PageStack {
     function openPsbtFileImport() {
         root.returnToSendForm()
         Qt.callLater(sendPage.openPsbtFileImport)
+    }
+
+    function applyPaymentRequest(uri, source) {
+        root.returnToSendForm()
+        Qt.callLater(function() { sendPage.handleIncomingPaymentUri(uri, source) })
     }
 
     function clearPrepareTransactionError() {
@@ -85,6 +91,7 @@ PageStack {
             sendPage.m_filledUri = ""
             sendPage.m_dismissedUri = ""
             sendPage.m_applyingUri = false
+            sendPage.m_paymentUriInterrupted = paymentUriOverwritePopup.visible
             sendPage.clearPendingPaymentUriPaste()
             paymentUriOverwritePopup.close()
         }
@@ -317,6 +324,18 @@ PageStack {
         property bool m_applyingUri: false
         property var m_pendingPastedPaymentRequest: null
         property string m_pendingPastedPaymentRequestText: ""
+        property string m_pendingPastedPaymentRequestSource: ""
+        property bool m_paymentUriInterrupted: false
+        property bool m_paymentUriRejected: false
+
+        // Any path that clears the error resumes the queue, not just the
+        // banner button: an import from another source replaces the message.
+        onPaymentRequestIsErrorChanged: {
+            if (!paymentRequestIsError && m_paymentUriRejected) {
+                m_paymentUriRejected = false
+                root.paymentRequestOutcome("acknowledged")
+            }
+        }
 
         function looksLikePaymentUri(text) {
             return String(text).trim().toLowerCase().startsWith("bitcoin:")
@@ -352,10 +371,11 @@ PageStack {
         function clearPendingPaymentUriPaste() {
             m_pendingPastedPaymentRequest = null
             m_pendingPastedPaymentRequestText = ""
+            m_pendingPastedPaymentRequestSource = ""
         }
 
-        function applyPastedPaymentRequest(result, text) {
-            applyParsedPaymentRequest(result, qsTr("clipboard"))
+        function applyPastedPaymentRequest(result, text, source) {
+            applyParsedPaymentRequest(result, source)
             if (result.success && Clipboard.text() === text) {
                 m_filledUri = text
                 showClipboardUriBanner = false
@@ -363,18 +383,30 @@ PageStack {
         }
 
         function handlePaymentUriPaste(text, sourceField) {
+            handlePaymentUriRequest(text, qsTr("clipboard"), sourceField)
+        }
+
+        function handleIncomingPaymentUri(text, source) {
+            handlePaymentUriRequest(text, source, "")
+        }
+
+        function handlePaymentUriRequest(text, source, sourceField) {
             const result = BitcoinUri.parseBitcoinUri(text)
             if (!result.success) {
-                applyParsedPaymentRequest(result, qsTr("clipboard"))
+                applyParsedPaymentRequest(result, source)
+                m_paymentUriRejected = true
+                root.paymentRequestOutcome("rejected")
                 return
             }
             if (paymentUriConflicts(result, sourceField)) {
                 m_pendingPastedPaymentRequest = result
                 m_pendingPastedPaymentRequestText = text
+                m_pendingPastedPaymentRequestSource = source
                 paymentUriOverwritePopup.open()
                 return
             }
-            applyPastedPaymentRequest(result, text)
+            applyPastedPaymentRequest(result, text, source)
+            root.paymentRequestOutcome("resolved")
         }
 
         function handleClipboardPaste(field) {
@@ -485,15 +517,21 @@ PageStack {
             message: qsTr("The payment request from the clipboard contains information that differs from the currently populated values. Pasting will replace the values.")
             messageObjectName: "sendPaymentUriOverwriteMessage"
 
+            // Escape, a press outside and a wallet switch all close the popup
+            // without going through an action, so the outcome is reported here.
+            onClosed: {
+                const interrupted = sendPage.m_paymentUriInterrupted
+                sendPage.m_paymentUriInterrupted = false
+                sendPage.clearPendingPaymentUriPaste()
+                root.paymentRequestOutcome(interrupted ? "interrupted" : "resolved")
+            }
+
             AlertAction {
                 text: qsTr("Cancel")
                 role: AlertAction.Cancel
                 buttonObjectName: "sendPaymentUriOverwriteCancelButton"
                 closesPopup: false
-                onTriggered: {
-                    sendPage.clearPendingPaymentUriPaste()
-                    paymentUriOverwritePopup.close()
-                }
+                onTriggered: paymentUriOverwritePopup.close()
             }
 
             AlertAction {
@@ -503,9 +541,9 @@ PageStack {
                 onTriggered: {
                     const result = sendPage.m_pendingPastedPaymentRequest
                     const text = sendPage.m_pendingPastedPaymentRequestText
-                    sendPage.clearPendingPaymentUriPaste()
+                    const source = sendPage.m_pendingPastedPaymentRequestSource
                     paymentUriOverwritePopup.close()
-                    if (result) sendPage.applyPastedPaymentRequest(result, text)
+                    if (result) sendPage.applyPastedPaymentRequest(result, text, source)
                 }
             }
         }
@@ -852,6 +890,7 @@ PageStack {
                     visible: sendPage.paymentRequestIsError && sendPage.paymentRequestStatus.length > 0
                     tintColor: Theme.color.red
                     iconSource: "image://images/alert-filled"
+                    objectName: "sendPaymentRequestError"
                     text: sendPage.paymentRequestStatus
                     textObjectName: "sendPaymentRequestStatusText"
                     showsCloseButton: true

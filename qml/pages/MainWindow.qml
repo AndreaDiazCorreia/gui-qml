@@ -45,6 +45,7 @@ ApplicationWindow {
     readonly property bool waitForPostOnboardingWalletRoute: preInitOnboardingRanForUi && desktopWalletMode
     property bool postOnboardingWalletRouteResolved: false
     property bool shutdownInProgress: false
+    property bool paymentUriDeliveryInFlight: false
     readonly property var menuEditTarget: appWindow.editTarget(appWindow.activeFocusItem)
     readonly property var menuWalletController: appWindow.desktopWalletMode ? walletController : null
     readonly property bool menuNavigationEnabled: main.depth === 1
@@ -101,6 +102,45 @@ ApplicationWindow {
         })
     }
 
+    // A queued request that cannot be delivered now is retried on wallet changes.
+    function deliverPendingPaymentUri() {
+        if (appWindow.paymentUriDeliveryInFlight || !paymentUriHandler.hasPendingRequest) {
+            return
+        }
+        if (!appWindow.desktopWalletMode) {
+            return
+        }
+        // selectedWallet is never null: an empty model stands in until a wallet
+        // is open. Every swap before initialization resets the Send form.
+        if (!walletController.initialized || !walletController.isWalletLoaded) {
+            return
+        }
+        const shell = main.depth === 1 ? main.currentItem : null
+        if (!shell || typeof shell.applyIncomingPaymentUri !== "function") {
+            return
+        }
+        appWindow.paymentUriDeliveryInFlight = true
+        shell.applyIncomingPaymentUri(paymentUriHandler.pendingRequest(), qsTr("command line"))
+    }
+
+    function finishPendingPaymentUri(outcome) {
+        if (outcome === "acknowledged") {
+            Qt.callLater(appWindow.deliverPendingPaymentUri)
+            return
+        }
+        if (!appWindow.paymentUriDeliveryInFlight) {
+            return
+        }
+        appWindow.paymentUriDeliveryInFlight = false
+        if (outcome !== "interrupted") {
+            paymentUriHandler.completePendingRequest()
+        }
+        // A rejection stays on screen until dismissed; chaining would hide it.
+        if (outcome !== "rejected") {
+            Qt.callLater(appWindow.deliverPendingPaymentUri)
+        }
+    }
+
     function resolvePostOnboardingWalletRoute() {
         if (appWindow.postOnboardingWalletRouteResolved) {
             return
@@ -113,6 +153,7 @@ ApplicationWindow {
         }
         appWindow.postOnboardingWalletRouteResolved = true
         main.replace(desktopWallets, {}, StackView.Immediate)
+        Qt.callLater(appWindow.deliverPendingPaymentUri)
         if (walletController.noWalletsFound) {
             main.push(createWalletWizard, {
                 "launchContext": CreateWalletWizard.Context.Onboarding
@@ -327,9 +368,16 @@ ApplicationWindow {
         target: appWindow.desktopWalletMode ? walletController : null
         function onInitializedChanged() {
             appWindow.resolvePostOnboardingWalletRoute()
+            Qt.callLater(appWindow.deliverPendingPaymentUri)
         }
         function onNoWalletsFoundChanged() {
             appWindow.resolvePostOnboardingWalletRoute()
+        }
+        function onSelectedWalletChanged() {
+            Qt.callLater(appWindow.deliverPendingPaymentUri)
+        }
+        function onIsWalletLoadedChanged() {
+            Qt.callLater(appWindow.deliverPendingPaymentUri)
         }
     }
 
@@ -366,6 +414,7 @@ ApplicationWindow {
             onSendTransaction: {
                 main.push(sendReviewPage)
             }
+            onPaymentRequestOutcome: (outcome) => appWindow.finishPendingPaymentUri(outcome)
         }
     }
 
@@ -445,6 +494,7 @@ ApplicationWindow {
             if (appWindow.waitForPostOnboardingWalletRoute) {
                 Qt.callLater(appWindow.resolvePostOnboardingWalletRoute)
             }
+            Qt.callLater(appWindow.deliverPendingPaymentUri)
         }
     }
 
