@@ -14,6 +14,7 @@ Requires:
 """
 
 import sys
+import time
 
 from qml_wallet_test_lib import WalletFlowHarness, rpc_call, wait_for_rpc
 
@@ -188,9 +189,13 @@ def run_tests():
         gui = harness.driver
         gui.wait_for_property("walletBadge", "loading", False, timeout_ms=30000)
         gui.wait_for_property("walletBadge", "noWalletLoaded", True, timeout_ms=20000)
+        gui.wait_for_property(
+            "paymentUriNoWalletPopup", "opened", True, timeout_ms=20000,
+        )
         assert gui.get_property("sendNoteInput", "text") == "", (
             "The request was applied to the empty wallet model"
         )
+        gui.click("paymentUriNoWalletOpenButton")
         rpc_call(
             harness.gui_rpc_port, "loadwallet",
             {"filename": WALLET_NAME, "load_on_startup": True},
@@ -202,7 +207,7 @@ def run_tests():
             "sendNoteInput", "text",
             lambda v: "late-label" in str(v), timeout_ms=30000,
         )
-        print("Test 5 PASSED: request kept until a wallet was loaded.")
+        print("Test 5 PASSED: no-wallet offer raised, request kept until a wallet loaded.")
 
         # ----------------------------------------------------------------
         # Test 6: a rejection is not hidden by the request behind it. The
@@ -313,6 +318,96 @@ def run_tests():
             "A request for another network must not populate the form"
         )
         print("Test 9 PASSED: address from another network rejected.")
+
+        # ----------------------------------------------------------------
+        # Test 10: discarding a request that had nowhere to go lets the next
+        # one through instead of stalling the queue behind it.
+        # ----------------------------------------------------------------
+        rpc_call(
+            harness.gui_rpc_port, "unloadwallet",
+            {"wallet_name": WALLET_NAME, "load_on_startup": False},
+        )
+        harness.restart_gui(extra_args=[
+            f"bitcoin:{first_address}?label=discarded-label",
+            f"bitcoin:{second_address}?label=survivor-label",
+        ])
+        wait_for_rpc(harness.gui_rpc_port)
+        gui = harness.driver
+        gui.wait_for_property("walletBadge", "noWalletLoaded", True, timeout_ms=30000)
+        gui.wait_for_property(
+            "paymentUriNoWalletPopup", "opened", True, timeout_ms=20000,
+        )
+        gui.click("paymentUriNoWalletDiscardButton")
+        # Nothing else happens in between: the notice must come back on its own
+        # for the second request. Sleep past the close transition so a popup
+        # still animating out is not read as one that reopened.
+        time.sleep(1.5)
+        assert gui.get_property("paymentUriNoWalletPopup", "opened") is True, (
+            "Discarding the first request left the second one unannounced"
+        )
+        rpc_call(
+            harness.gui_rpc_port, "loadwallet",
+            {"filename": WALLET_NAME, "load_on_startup": True},
+        )
+        wait_for_wallet(gui)
+        apply_review(gui)
+        gui.wait_for_property(
+            "sendNoteInput", "text",
+            lambda v: "survivor-label" in str(v), timeout_ms=30000,
+        )
+        print("Test 10 PASSED: discarding one request released the next.")
+
+        # ----------------------------------------------------------------
+        # Test 11: a wallet that appears while a wizard covers the shell
+        # still gets the request, which is delivered on the way back.
+        # ----------------------------------------------------------------
+        rpc_call(
+            harness.gui_rpc_port, "unloadwallet",
+            {"wallet_name": WALLET_NAME, "load_on_startup": False},
+        )
+        harness.restart_gui(extra_args=[f"bitcoin:{first_address}?label=wizard-label"])
+        wait_for_rpc(harness.gui_rpc_port)
+        gui = harness.driver
+        gui.wait_for_property("walletBadge", "noWalletLoaded", True, timeout_ms=30000)
+        gui.wait_for_property(
+            "paymentUriNoWalletPopup", "opened", True, timeout_ms=20000,
+        )
+        gui.click("paymentUriNoWalletCreateButton")
+        gui.wait_for_property(
+            "typeSelectorCancelButton", "visible", True, timeout_ms=10000,
+        )
+        rpc_call(
+            harness.gui_rpc_port, "loadwallet",
+            {"filename": WALLET_NAME, "load_on_startup": True},
+        )
+        wait_for_wallet(gui)
+        gui.click("typeSelectorCancelButton")
+        apply_review(gui)
+        gui.wait_for_property(
+            "sendNoteInput", "text",
+            lambda v: "wizard-label" in str(v), timeout_ms=30000,
+        )
+        print("Test 11 PASSED: request delivered after the wizard was left.")
+
+        # ----------------------------------------------------------------
+        # Test 12: started without wallet support there is nowhere to send
+        # the request, so it is reported instead of waiting forever. Runs
+        # last because it leaves the application without a wallet.
+        # ----------------------------------------------------------------
+        harness.restart_gui(extra_args=[
+            "-disablewallet",
+            f"bitcoin:{first_address}?label=disabled-label",
+        ])
+        wait_for_rpc(harness.gui_rpc_port)
+        gui = harness.driver
+        gui.wait_for_property(
+            "paymentUriWalletDisabledPopup", "opened", True, timeout_ms=30000,
+        )
+        gui.click("paymentUriWalletDisabledOkButton")
+        gui.wait_for_property(
+            "paymentUriWalletDisabledPopup", "opened", False, timeout_ms=10000,
+        )
+        print("Test 12 PASSED: request reported in node-only mode.")
 
         print("\n" + "=" * 50)
         print("All tests PASSED")
