@@ -78,11 +78,12 @@ ColumnLayout {
         showErrorText: checked && root.selectedLocationStorageError.length > 0
         onClicked: folderDialog.open()
     }
-    AppFolderDialog {
+    AppFileDialog {
         id: folderDialog
         objectName: "customDataDirFolderDialog"
+        fileMode: AppFileDialog.Directory
         onAccepted: {
-            var customDataDir = folderDialog.selectedFolder.toString();
+            var customDataDir = folderDialog.selectedFile.toString();
             if (customDataDir !== "") {
                 root.validationError = root.settingsModel.validateCustomDataDir(customDataDir)
                 if (root.validationError === "" && root.settingsModel.selectCustomDataDir(customDataDir)) {
