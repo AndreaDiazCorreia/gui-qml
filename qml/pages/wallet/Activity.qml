@@ -299,6 +299,7 @@ PageStack {
 
             AppFileDialog {
                 id: exportDialog
+                objectName: "activityExportDialog"
                 defaultSuffix: "csv"
                 fileMode: AppFileDialog.SaveFile
                 nameFilters: [qsTr("Comma separated file (*.csv)")]
