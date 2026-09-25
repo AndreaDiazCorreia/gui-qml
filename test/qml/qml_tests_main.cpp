@@ -14,6 +14,7 @@
 #include <QRegularExpression>
 #include <QSortFilterProxyModel>
 #include <QStringList>
+#include <QUrl>
 #include <QVariantList>
 #include <QVariantMap>
 #include <qqml.h>
@@ -490,6 +491,71 @@ private:
     Category m_category{SingleUse};
     bool m_show_used{false};
     bool m_set_address_label_succeeds{false};
+};
+
+class MockFileDialog : public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(QString title MEMBER m_title NOTIFY titleChanged)
+    Q_PROPERTY(int fileMode MEMBER m_file_mode NOTIFY fileModeChanged)
+    Q_PROPERTY(QString defaultSuffix MEMBER m_default_suffix NOTIFY defaultSuffixChanged)
+    Q_PROPERTY(QStringList nameFilters MEMBER m_name_filters NOTIFY nameFiltersChanged)
+    Q_PROPERTY(QUrl currentFolder MEMBER m_current_folder NOTIFY currentFolderChanged)
+    Q_PROPERTY(QUrl currentFile MEMBER m_current_file NOTIFY currentFileChanged)
+    Q_PROPERTY(QUrl selectedFile MEMBER m_selected_file NOTIFY selectedFileChanged)
+    Q_PROPERTY(bool visible MEMBER m_visible NOTIFY visibleChanged)
+    Q_PROPERTY(int openCalls MEMBER m_open_calls NOTIFY openCallsChanged)
+
+public:
+    enum FileMode { OpenFile, SaveFile, Directory };
+    Q_ENUM(FileMode)
+
+    QString m_title;
+    int m_file_mode{OpenFile};
+    QString m_default_suffix;
+    QStringList m_name_filters;
+    QUrl m_current_folder;
+    QUrl m_current_file;
+    QUrl m_selected_file;
+    bool m_visible{false};
+    int m_open_calls{0};
+
+    Q_INVOKABLE void open()
+    {
+        ++m_open_calls;
+        m_visible = true;
+        Q_EMIT openCallsChanged();
+        Q_EMIT visibleChanged();
+    }
+
+    Q_INVOKABLE void close()
+    {
+        m_visible = false;
+        Q_EMIT visibleChanged();
+    }
+
+    /** Stand in for the user picking a file. */
+    Q_INVOKABLE void selectAndAccept(const QUrl& file)
+    {
+        m_selected_file = file;
+        m_visible = false;
+        Q_EMIT selectedFileChanged();
+        Q_EMIT visibleChanged();
+        Q_EMIT accepted();
+    }
+
+Q_SIGNALS:
+    void titleChanged();
+    void fileModeChanged();
+    void defaultSuffixChanged();
+    void nameFiltersChanged();
+    void currentFolderChanged();
+    void currentFileChanged();
+    void selectedFileChanged();
+    void visibleChanged();
+    void openCallsChanged();
+    void accepted();
+    void rejected();
 };
 
 class MockPaymentRequest : public QObject
@@ -3835,6 +3901,7 @@ public Q_SLOTS:
             "DebugLogModel",
             "Test stub type"
         );
+        qmlRegisterType<MockFileDialog>("org.bitcoincore.qt", 1, 0, "AppFileDialog");
         qmlRegisterType<BlockClockDial>("org.bitcoincore.qt", 1, 0, "BlockClockDial");
         qmlRegisterType<LineGraph>("org.bitcoincore.qt", 1, 0, "LineGraph");
         engine->rootContext()->setContextProperty(QStringLiteral("optionsModel"), &options_model);
