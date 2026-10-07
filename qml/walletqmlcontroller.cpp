@@ -108,6 +108,10 @@ void WalletQmlController::setSelectedWallet(QString path, QString wallet_format)
         }
     }
 
+    if (walletImportInProgress()) {
+        return;
+    }
+
     startWalletLoad(path, wallet_format);
 }
 
@@ -383,6 +387,7 @@ WalletQmlModel* WalletQmlController::addOrSelectWalletModel(std::unique_ptr<inte
         }
     }
     if (selected_existing_wallet) {
+        finishWalletImport(m_selected_wallet->name());
         applyWalletDisplayName(m_selected_wallet);
         Q_EMIT walletLoadStateChanged(m_selected_wallet->name(),
                                       WalletListModel::LoadState::Open,
@@ -407,6 +412,7 @@ WalletQmlModel* WalletQmlController::addOrSelectWalletModel(std::unique_ptr<inte
     Q_EMIT walletLoadStateChanged(loaded_wallet_name,
                                   WalletListModel::LoadState::Open,
                                   QString{});
+    finishWalletImport(loaded_wallet_name);
     publishWalletInfo(wallet_model);
     Q_EMIT selectedWalletChanged();
     setWalletLoaded(true);
@@ -506,7 +512,7 @@ void WalletQmlController::createWalletAsync(const QString& name,
 
 void WalletQmlController::createSingleSigWallet(const QString &name, const QString &passphrase)
 {
-    if (m_wallet_load_in_progress) {
+    if (walletWorkerBusy()) {
         return;
     }
     clearWalletCreateStatus();
@@ -533,6 +539,9 @@ void WalletQmlController::createSingleSigWallet(const QString &name, const QStri
 
 bool WalletQmlController::createExternalSignerWallet(const QString& name)
 {
+    if (walletImportInProgress()) {
+        return false;
+    }
     clearWalletLoadStatus();
     clearWalletMigrationStatus();
     if (!m_initialized) {
@@ -578,7 +587,7 @@ bool WalletQmlController::createExternalSignerWallet(const QString& name)
 
 void WalletQmlController::createWatchOnlyWallet(const QString &name, const QString &xpub)
 {
-    if (m_wallet_load_in_progress) {
+    if (walletWorkerBusy()) {
         return;
     }
     clearWalletLoadStatus();
@@ -659,6 +668,9 @@ void WalletQmlController::importWallet(const QString& path)
 {
     if (!m_initialized) {
         setWalletLoadError(tr("Wallets are still loading. Try again in a moment."));
+        return;
+    }
+    if (walletWorkerBusy()) {
         return;
     }
     startWalletImport(path);
@@ -1024,8 +1036,12 @@ void WalletQmlController::startWalletImport(const QString& path)
     }
 
     const QString restore_wallet_name = inferRestoreWalletName(normalized_path);
+    if (restore_wallet_name.isEmpty()) {
+        setWalletLoadError(tr("Choose a wallet backup file."));
+        return;
+    }
 
-    setWalletLoadInProgress(true);
+    setImportingWalletName(restore_wallet_name);
 
     QTimer::singleShot(0, m_worker, [this, normalized_path, restore_wallet_name]() {
         std::vector<bilingual_str> warning_messages;
@@ -1256,11 +1272,31 @@ void WalletQmlController::setWalletLoadInProgress(bool in_progress)
     }
 }
 
+void WalletQmlController::setImportingWalletName(const QString& wallet_name)
+{
+    if (m_importing_wallet_name != wallet_name) {
+        m_importing_wallet_name = wallet_name;
+        Q_EMIT walletImportInProgressChanged();
+    }
+}
+
 void WalletQmlController::setWalletLoadError(const QString& error)
 {
     if (m_wallet_load_error != error) {
         m_wallet_load_error = error;
         Q_EMIT walletLoadErrorChanged();
+    }
+    // Only the import can report a load error while it runs.
+    if (walletImportInProgress() && !error.isEmpty()) {
+        setImportingWalletName(QString());
+        Q_EMIT walletImportFailed();
+    }
+}
+
+void WalletQmlController::finishWalletImport(const QString& wallet_name)
+{
+    if (wallet_name == m_importing_wallet_name) {
+        setImportingWalletName(QString());
     }
 }
 
