@@ -93,7 +93,8 @@ ApplicationWindow {
     }
 
     function openWalletCreation() {
-        if (!appWindow.menuNavigationEnabled) {
+        if (!appWindow.menuNavigationEnabled
+                || (appWindow.menuWalletController && appWindow.menuWalletController.walletImportInProgress)) {
             return
         }
         walletCreationModal.open()
@@ -161,6 +162,9 @@ ApplicationWindow {
             : false
         walletBusy: appWindow.menuWalletController
             ? appWindow.menuWalletController.walletLoadInProgress
+            : false
+        walletImportBusy: appWindow.menuWalletController
+            ? appWindow.menuWalletController.walletImportInProgress
             : false
         canUndo: appWindow.menuEditTarget
             && typeof appWindow.menuEditTarget.undo === "function"
@@ -340,9 +344,7 @@ ApplicationWindow {
         id: desktopWallets
         DesktopWallets {
             objectName: "desktopWalletsPage"
-            onAddWallet: {
-                walletCreationModal.open()
-            }
+            onAddWallet: appWindow.openWalletCreation()
         }
     }
 
@@ -350,6 +352,13 @@ ApplicationWindow {
         id: walletCreationModal
         onFinished: function(openActivity) {
             if (openActivity) appWindow.routeToShell("openActivity")
+        }
+    }
+
+    Connections {
+        target: appWindow.menuWalletController
+        function onWalletImportFailed() {
+            if (!walletCreationModal.opened) walletCreationModal.openForImportError()
         }
     }
 
