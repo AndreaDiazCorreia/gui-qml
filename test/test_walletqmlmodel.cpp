@@ -693,7 +693,7 @@ private Q_SLOTS:
     }
     void estimatedFeeForTarget_returnsEmptyWhenUnavailable();
     void scheduleFeeEstimates_populatesFormattedEstimates();
-    void scheduleFeeEstimates_fallsBackWhenNetworkFeeEstimatesUnavailable();
+    void scheduleFeeEstimates_reportsUnavailableNetworkEstimates();
     void scheduleFeeEstimates_usesStaticRegtestFeeOverride();
     void customFeeRateValid_data();
     void customFeeRateValid();
@@ -1122,52 +1122,42 @@ void WalletQmlModelTests::scheduleFeeEstimates_populatesFormattedEstimates()
     QCOMPARE(model->estimatedFee(), QStringLiteral("0.00000200 BTC"));
 }
 
-void WalletQmlModelTests::scheduleFeeEstimates_fallsBackWhenNetworkFeeEstimatesUnavailable()
+void WalletQmlModelTests::scheduleFeeEstimates_reportsUnavailableNetworkEstimates()
 {
-    auto [wallet, model] = MakeWalletModel();
+    node::NodeContext node_context;
+    auto chain = interfaces::MakeChain(node_context);
+    wallet::CWallet raw_wallet{chain.get(), "fallback-disabled-test", nullptr};
+    raw_wallet.m_allow_fallback_fee = false;
+    auto [wallet, model] = MakeWalletModel(nullptr, &raw_wallet);
     SetValidRecipient(*model);
 
-    ThreadSafeCallLog<FeeEstimateCall> fallback_calls;
-
     [[maybe_unused]] auto verify_wallet = wallet->VerifyOnExit();
-    wallet->ExpectNoCalls(wallet->calls.getNewDestination);
-    wallet->ExpectAtLeast(wallet->calls.getRequiredFee, 3);
-    wallet->create_transaction_fn = [&](const std::vector<wallet::CRecipient>& recipients,
-                                        const wallet::CCoinControl& coin_control,
-                                        bool sign,
-                                        int& change_pos,
-                                        CAmount& fee) -> util::Result<CTransactionRef> {
+    wallet->ExpectNoCalls(wallet->calls.getRequiredFee);
+    wallet->get_fee_reason_fn = [](const wallet::CCoinControl&) { return FeeReason::FALLBACK; };
+
+    model->scheduleFeeEstimates();
+
+    QTRY_VERIFY_WITH_TIMEOUT(!model->feeEstimatePending(), FEE_ESTIMATE_TIMEOUT_MS);
+    QVERIFY(model->feeEstimationUnavailable());
+    QCOMPARE(model->estimatedFeeForTarget(2), QString());
+    QCOMPARE(model->estimatedFeeForTarget(6), QString());
+    QCOMPARE(model->estimatedFeeForTarget(10), QString());
+    QCOMPARE(model->estimatedFeeSatoshi(), qint64{-1});
+    QCOMPARE(wallet->calls.createTransaction.load(), 0);
+
+    raw_wallet.m_allow_fallback_fee = true;
+    wallet->create_transaction_fn = [](const std::vector<wallet::CRecipient>&, const wallet::CCoinControl&, bool,
+                                       int& change_pos, CAmount& fee) -> util::Result<CTransactionRef> {
         change_pos = -1;
-
-        if (!coin_control.m_feerate.has_value()) {
-            return util::Error{Untranslated("fee estimation unavailable")};
-        }
-
-        fallback_calls.Append({
-            coin_control.m_confirm_target.value_or(0),
-            sign,
-            coin_control.HasSelected() || !coin_control.ListSelected().empty(),
-            coin_control.m_feerate->GetFeePerK(),
-            recipients.size(),
-        });
-        fee = coin_control.m_feerate->GetFee(250);
-        return util::Result<CTransactionRef>{MakeTransactionRef(CMutableTransaction{})};
+        fee = 250;
+        return MakeTransactionRef(CMutableTransaction{});
     };
 
     model->scheduleFeeEstimates();
 
-    QTRY_COMPARE_WITH_TIMEOUT(model->estimatedFeeForTarget(6), QStringLiteral("0.00000500 BTC"), FEE_ESTIMATE_TIMEOUT_MS);
     QTRY_VERIFY_WITH_TIMEOUT(!model->feeEstimatePending(), FEE_ESTIMATE_TIMEOUT_MS);
-    QTRY_VERIFY_WITH_TIMEOUT(fallback_calls.Size() == 3, FEE_ESTIMATE_TIMEOUT_MS);
-    QCOMPARE(model->estimatedFeeForTarget(2), QStringLiteral("0.00000750 BTC"));
-    QCOMPARE(model->estimatedFeeForTarget(6), QStringLiteral("0.00000500 BTC"));
-    QCOMPARE(model->estimatedFeeForTarget(10), QStringLiteral("0.00000250 BTC"));
-    QCOMPARE(model->estimatedFee(), QStringLiteral("0.00000500 BTC"));
-    CompareFeeEstimateCalls(fallback_calls.Snapshot(), {
-                                                           {0, false, false, CAmount{3000}, 1},
-                                                           {0, false, false, CAmount{2000}, 1},
-                                                           {0, false, false, CAmount{1000}, 1},
-                                                       });
+    QVERIFY(!model->feeEstimationUnavailable());
+    QCOMPARE(model->estimatedFeeSatoshi(), qint64{250});
 }
 
 void WalletQmlModelTests::scheduleFeeEstimates_usesStaticRegtestFeeOverride()

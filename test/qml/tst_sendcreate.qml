@@ -35,6 +35,7 @@ TestCase {
         testWalletModel.clearMaximum()
         testWalletModel.sendTransactionResult = true
         testWalletModel.feeEstimatePending = false
+        testWalletModel.feeEstimationUnavailable = false
         testWalletModel.customFeeEnabled = false
         testWalletModel.customFeeRate = ""
         testWalletModel.targetBlocks = 6
@@ -394,6 +395,28 @@ TestCase {
         tryCompare(continueButton, "enabled", false)
         tryCompare(page, "formErrorText", "Selected inputs do not cover the amount plus fee")
         compare(prepareErrorText.text, "Selected inputs do not cover the amount plus fee")
+    }
+
+    function test_send_requires_custom_fee_when_estimation_unavailable() {
+        const page = createTemporaryObject(sendComponent, this)
+        verify(page !== null)
+
+        const continueButton = findChild(page, "sendReviewButton")
+        const feeSection = findChild(page, "sendNetworkFeeSection")
+        verify(continueButton !== null)
+        verify(feeSection !== null)
+        tryCompare(continueButton, "enabled", true)
+
+        testWalletModel.feeEstimationUnavailable = true
+
+        tryCompare(continueButton, "enabled", false)
+        tryCompare(feeSection, "footerText", "Your node can't estimate fees yet. Choose Custom and enter a fee rate to continue.")
+
+        testWalletModel.customFeeEnabled = true
+        testWalletModel.customFeeRate = "2"
+
+        tryCompare(continueButton, "enabled", true)
+        tryCompare(feeSection, "footerText", "")
     }
 
     function test_send_shows_recipient_validation_error() {

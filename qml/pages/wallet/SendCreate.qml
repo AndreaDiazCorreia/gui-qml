@@ -984,6 +984,8 @@ PageStack {
                                 footerText: !root.wallet ? ""
                                     : root.wallet.feeEstimatePending ? qsTr("Estimating…")
                                     : root.wallet.estimatedFeeSatoshi >= 0 ? ""
+                                    : root.wallet.feeEstimationUnavailable && !root.wallet.customFeeEnabled
+                                        ? qsTr("Your node can't estimate fees yet. Choose Custom and enter a fee rate to continue.")
                                     : root.wallet.recipients.allValid ? qsTr("Fee estimate unavailable")
                                     : qsTr("Enter a valid recipient address and amount to estimate the fee")
                                 SendFeeSelection { Layout.fillWidth: true; walletModel: root.wallet; onFeeChanged: root.clearPrepareTransactionError() }
@@ -1060,7 +1062,8 @@ PageStack {
                                 Layout.fillWidth: true
                                 text: qsTr("Review Transaction")
                                 enabled: root.wallet && root.wallet.recipients.allValid && !root.wallet.feeEstimatePending
-                                    && !root.wallet.sendAmountExhaustsBalance && (!root.wallet.customFeeEnabled || root.wallet.customFeeRateValid)
+                                    && !root.wallet.sendAmountExhaustsBalance
+                                    && (root.wallet.customFeeEnabled ? root.wallet.customFeeRateValid : !root.wallet.feeEstimationUnavailable)
                                 onClicked: root.confirmTransactionReview()
                             }
                         }
